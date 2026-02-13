@@ -35,4 +35,4 @@ export interface CalculationResult {
   guaranteedProfit: number;
 }
 
-export type LeagueTab = 'All' | 'NBA/NCAA' | 'NHL' | 'UFC';
+export type LeagueTab = 'All' | 'NBA' | 'NCAA' | 'NHL' | 'UFC';
