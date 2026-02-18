@@ -3,13 +3,13 @@ import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyCdN1zEjrQyg37RkLRyC9k602dCv6OWJLc",
-  authDomain: "sports-card-a1d20.firebaseapp.com",
-  projectId: "sports-card-a1d20",
-  storageBucket: "sports-card-a1d20.firebasestorage.app",
-  messagingSenderId: "41212439209",
-  appId: "1:41212439209:web:14b0f561c31e4a45ad57b8",
-  measurementId: "G-SGQ0EKYRHJ"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 // Initialize Firebase

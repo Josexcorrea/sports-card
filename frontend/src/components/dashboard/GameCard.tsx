@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { Game } from '../../types';
 import { useAuth } from '../../hooks/useAuth';
 import {
@@ -9,6 +9,38 @@ import {
 
 interface GameCardProps {
   game: Game;
+}
+
+interface GameAnalysis {
+  game_id: string;
+  away_team: string;
+  home_team: string;
+  sport: string;
+  event_time: string;
+  sharp_odds: number;
+  pm_odds: number;
+  best_offer: string;
+  ev_analysis: {
+    sharp_probability: number;
+    best_offer_probability: number;
+    expected_value_percent: number;
+    is_profitable: boolean;
+  };
+  kelly_calculation: {
+    kelly_percent: number;
+    bankroll: number;
+    full_kelly_bet: number;
+    half_kelly_bet: number;
+    quarter_kelly_bet: number;
+  };
+  arbitrage_scenarios: Array<{
+    hedge_odds: number;
+    required_bet: number;
+    guaranteed_profit: number;
+    roi: number;
+  }>;
+  confidence_score: number;
+  ml_recommendation: string;
 }
 
 export function GameCard({ game }: GameCardProps) {
@@ -22,12 +54,19 @@ export function GameCard({ game }: GameCardProps) {
   // Editable odds state (for what-if scenarios)
   const [editableSharpML, setEditableSharpML] = useState(game.sharpSportsbookFavLine);
   const [editableBestOfferOdds, setEditableBestOfferOdds] = useState(game.predictionMarketFavLine);
+  
+  // API state
+  const [analysis, setAnalysis] = useState<GameAnalysis | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Initialize editable odds when modal opens
   const handleExpandModal = () => {
     setIsExpanded(true);
     setEditableSharpML(game.sharpSportsbookFavLine);
     setEditableBestOfferOdds(game.predictionMarketFavLine);
+    // Fetch analysis for live data
+    fetchAnalysis(game.sharpSportsbookFavLine, game.predictionMarketFavLine);
   };
 
   // Reset to live data when modal closes
@@ -36,40 +75,87 @@ export function GameCard({ game }: GameCardProps) {
     setIsArbExpanded(false);
   };
 
+  // Fetch analysis from backend API
+  const fetchAnalysis = async (sharpOdds: number, pmOdds: number) => {
+    setIsLoading(true);
+    setError(null);
+    
+    try {
+      const response = await fetch('http://localhost:8000/calculate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sharp_odds: sharpOdds,
+          pm_odds: pmOdds,
+          bankroll: currentUser?.bankroll || 0,
+          game_id: game.id,
+          away_team: game.awayTeam,
+          home_team: game.homeTeam,
+          sport: game.sport,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to calculate analysis');
+      }
+
+      const data: GameAnalysis = await response.json();
+      setAnalysis(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      console.error('API Error:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Refetch analysis when odds change (only if modal is open and we have analysis)
+  useEffect(() => {
+    if (!isExpanded || !analysis) return;
+    
+    const timer = setTimeout(() => {
+      fetchAnalysis(editableSharpML, editableBestOfferOdds);
+    }, 200); // Shorter debounce for responsiveness
+    
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editableSharpML, editableBestOfferOdds, isExpanded]);
+
   // Get bankroll from Auth context (Firestore)
   const bankroll = currentUser?.bankroll || 0;
 
-  // LIVE DATA (for collapsed view and initial state)
-  const sharpML = game.sharpSportsbookFavLine;
+  // Use API analysis if available, otherwise use live data for preview
+  const sharpML = editableSharpML || game.sharpSportsbookFavLine;
   const sharpProb = americanToImpliedProbability(sharpML);
   const sharpDecimal = americanToDecimal(sharpML);
-  const pmDecimal = americanToDecimal(game.predictionMarketFavLine);
   
-  const bestOfferOdds = pmDecimal > sharpDecimal ? game.predictionMarketFavLine : sharpML;
+  const pmOdds = editableBestOfferOdds || game.predictionMarketFavLine;
+  const pmDecimal = americanToDecimal(pmOdds);
+  
+  // Computed editable values
+  const editableSharpProb = americanToImpliedProbability(editableSharpML);
+  const editableBestOfferProb = americanToImpliedProbability(editableBestOfferOdds);
+  
+  const bestOfferOdds = pmDecimal > sharpDecimal ? pmOdds : sharpML;
   const bestOfferSource = pmDecimal > sharpDecimal ? 'PM' : 'Sharp';
   const bestOfferProb = americanToImpliedProbability(bestOfferOdds);
   const bestOfferDecimal = Math.max(sharpDecimal, pmDecimal);
 
-  // EDITABLE VALUES (for expanded view what-if scenarios)
-  const editableSharpProb = americanToImpliedProbability(editableSharpML);
-  const editableBestOfferDecimal = americanToDecimal(editableBestOfferOdds);
-  const editableBestOfferProb = americanToImpliedProbability(editableBestOfferOdds);
-  
-  // Use editable values for calculations when in expanded view, otherwise use live data
-  const activeSharpProb = isExpanded ? editableSharpProb : sharpProb;
-  const activeBestOfferDecimal = isExpanded ? editableBestOfferDecimal : bestOfferDecimal;
-
-  // Calculate EV: (Probability × Decimal Odds) - 1
-  const ev = (activeSharpProb * activeBestOfferDecimal) - 1;
-
-  // Calculate Kelly Criterion and risk amount
-  const kellyPercent = ev > 0 ? ev / (activeBestOfferDecimal - 1) : 0;
+  // Get values from API response or fallback to calculations
+  const ev = analysis ? (analysis.ev_analysis.expected_value_percent / 100) : ((sharpProb * bestOfferDecimal) - 1);
+  const hasPositiveEV = analysis ? analysis.ev_analysis.is_profitable : (ev > 0);
+  const kellyPercent = analysis ? analysis.kelly_calculation.kelly_percent : (ev > 0 ? ev / (bestOfferDecimal - 1) : 0);
   const kellyMultipliers = { full: 1, half: 0.5, quarter: 0.25 };
-  const riskAmount = bankroll * kellyPercent * kellyMultipliers[selectedKelly];
+  const kellySizeMap = {
+    full: analysis?.kelly_calculation.full_kelly_bet || 0,
+    half: analysis?.kelly_calculation.half_kelly_bet || 0,
+    quarter: analysis?.kelly_calculation.quarter_kelly_bet || 0,
+  };
+  const riskAmount = kellySizeMap[selectedKelly] || 0;
 
-  const hasPositiveEV = ev > 0;
-
-  // Calculate arbitrage scenarios
+  // Calculate arbitrage scenarios locally (independent of API)
   const arbScenarios = calculateArbProfitScenarios(arbFoundOdds, arbBetAmount);
 
   return (
@@ -160,27 +246,45 @@ export function GameCard({ game }: GameCardProps) {
               </button>
 
               <div className="p-6 pt-12">
-                {/* Header with Close and Arbitrage Toggle */}
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex-1 text-center">
-                    <div className="inline-block px-2 py-1 bg-blue-600 text-white text-xs font-bold rounded mb-2">
-                      {game.sport}
-                    </div>
-                    <div className="text-lg font-bold text-white">
-                      {game.awayTeam} @ {game.homeTeam}
-                    </div>
+                {/* Loading State */}
+                {isLoading && (
+                  <div className="text-center py-8">
+                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400"></div>
+                    <div className="text-gray-400 text-sm mt-2">Calculating...</div>
                   </div>
-                  <button
-                    onClick={() => setIsArbExpanded(!isArbExpanded)}
-                    className="ml-4 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded text-xs font-semibold transition-colors"
-                    title={isArbExpanded ? 'Hide Arbitrage' : 'Show Arbitrage'}
-                  >
-                    {isArbExpanded ? '✕ Arb' : '+ Arb'}
-                  </button>
-                </div>
+                )}
 
-                {/* Content Grid */}
-                <div className={`grid gap-6 ${isArbExpanded ? 'grid-cols-1 lg:grid-cols-[1fr_1fr]' : 'grid-cols-1'}`}>
+                {/* Error State */}
+                {error && (
+                  <div className="bg-red-900/30 border border-red-600 p-4 rounded mb-4 text-red-400 text-sm">
+                    Error: {error}
+                  </div>
+                )}
+
+                {/* Main Content */}
+                {!isLoading && (
+                  <>
+                    {/* Header with Close and Arbitrage Toggle */}
+                    <div className="flex items-center justify-between mb-6">
+                      <div className="flex-1 text-center">
+                        <div className="inline-block px-2 py-1 bg-blue-600 text-white text-xs font-bold rounded mb-2">
+                          {game.sport}
+                        </div>
+                        <div className="text-lg font-bold text-white">
+                          {game.awayTeam} @ {game.homeTeam}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setIsArbExpanded(!isArbExpanded)}
+                        className="ml-4 px-3 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded text-xs font-semibold transition-colors"
+                        title={isArbExpanded ? 'Hide Arbitrage' : 'Show Arbitrage'}
+                      >
+                        {isArbExpanded ? '✕ Arb' : '+ Arb'}
+                      </button>
+                    </div>
+
+                    {/* Content Grid */}
+                    <div className={`grid gap-6 ${isArbExpanded ? 'grid-cols-1 lg:grid-cols-[1fr_1fr]' : 'grid-cols-1'}`}>
                   {/* LEFT COLUMN - Main Analysis */}
                   <div className="space-y-4">
                     {/* Sharp vs Best Offer Comparison */}
@@ -397,7 +501,7 @@ export function GameCard({ game }: GameCardProps) {
                       {/* Profit Scenarios */}
                       {arbScenarios.length > 0 && (
                         <div className="mt-3">
-                          <div className="text-xs text-gray-400 uppercase mb-2">Hedge Scenarios</div>
+                          <div className="text-xs text-gray-400 uppercase mb-2">Hedging Results</div>
                           <div className="max-h-96 overflow-y-auto space-y-1" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                             {arbScenarios.map((scenario, idx) => (
                               <div
@@ -429,10 +533,12 @@ export function GameCard({ game }: GameCardProps) {
                   )}
                 </div>
 
-                {/* Footer */}
-                <div className="text-xs text-gray-500 text-center mt-6 pt-6 border-t border-gray-700">
-                  Click background or press ✕ to close
-                </div>
+                    {/* Footer */}
+                    <div className="text-xs text-gray-500 text-center mt-6 pt-6 border-t border-gray-700">
+                      Click background or press ✕ to close
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>

@@ -1,0 +1,176 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ============================================================================
+    // USER AUTHENTICATION & ADMIN CHECK
+    // ============================================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // ============================================================================
+    // USERS COLLECTION - Private user data
+    // ============================================================================
+    
+    match /users/{userId} {
+      // Read: Only the owner or admin can read their own data
+      allow read: if isAuthenticated() && (isOwner(userId) || isAdmin());
+      
+      // Create: On signup, user creates their own document with approved=false
+      allow create: if isAuthenticated() && isOwner(userId) && 
+        request.resource.data.keys().hasOnly(['email', 'displayName', 'bankroll', 'approved', 'createdAt']) &&
+        request.resource.data.approved == false &&
+        request.resource.data.bankroll >= 0 &&
+        request.resource.data.email is string &&
+        request.resource.data.displayName is string &&
+        request.resource.data.displayName.size() > 0 &&
+        request.resource.data.displayName.size() <= 100;
+      
+      // Update: Only owner can update their own document (except approved field)
+      allow update: if isAuthenticated() && isOwner(userId) && 
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['approved', 'email', 'createdAt']) &&
+        request.resource.data.bankroll >= 0 &&
+        request.resource.data.displayName is string &&
+        request.resource.data.displayName.size() > 0 &&
+        request.resource.data.displayName.size() <= 100;
+      
+      // Admin can update approved status
+      allow update: if isAdmin() && 
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['approved']);
+      
+      // Delete: Only admin can delete user accounts
+      allow delete: if isAdmin();
+      
+      // ========================================================================
+      // USER BETTING HISTORY SUBCOLLECTION
+      // ========================================================================
+      
+      match /bets/{betId} {
+        // Read: Only owner can read their bets
+        allow read: if isAuthenticated() && isOwner(userId);
+        
+        // Create: Only owner can create bets
+        allow create: if isAuthenticated() && isOwner(userId) &&
+          request.resource.data.keys().hasOnly(['gameId', 'side', 'amount', 'odds', 'result', 'createdAt']) &&
+          request.resource.data.amount > 0 &&
+          request.resource.data.odds is number &&
+          request.resource.data.side in ['fav', 'dog'];
+        
+        // Update: Owner can update result field only after bet settles
+        allow update: if isAuthenticated() && isOwner(userId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['result', 'settledAt']);
+        
+        // Delete: Prevent deletion of betting history (audit trail)
+        allow delete: if false;
+      }
+      
+      // ========================================================================
+      // USER PREFERENCES SUBCOLLECTION
+      // ========================================================================
+      
+      match /preferences/{preferenceId} {
+        // Read: Only owner can read preferences
+        allow read: if isAuthenticated() && isOwner(userId);
+        
+        // Create/Update: Only owner, strict validation
+        allow write: if isAuthenticated() && isOwner(userId) &&
+          request.resource.data.keys().hasOnly(['kellyFraction', 'favoriteLeagues', 'notificationsEnabled', 'theme']) &&
+          request.resource.data.kellyFraction >= 0.01 &&
+          request.resource.data.kellyFraction <= 1.0 &&
+          request.resource.data.theme in ['light', 'dark'];
+      }
+    }
+    
+    // ============================================================================
+    // ADMIN COLLECTION - Admin user roles
+    // ============================================================================
+    
+    match /admins/{adminId} {
+      // Read: Only admins can view
+      allow read: if isAdmin();
+      
+      // Create/Update: Not allowed (managed by Firebase console)
+      allow create, update, delete: if false;
+    }
+    
+    // ============================================================================
+    // GAMES COLLECTION - Public and approved game data
+    // ============================================================================
+    
+    match /games/{gameId} {
+      // Read: Authenticated users can read published games
+      allow read: if isAuthenticated() && resource.data.published == true;
+      
+      // Write: Only admin can create/update games
+      allow write: if isAdmin();
+      
+      // ========================================================================
+      // GAME ANALYSIS SUBCOLLECTION
+      // ========================================================================
+      
+      match /analysis/{analysisId} {
+        // Read: Authenticated users can read
+        allow read: if isAuthenticated() && get(/databases/$(database)/documents/games/$(gameId)).data.published == true;
+        
+        // Write: Only admin
+        allow write: if isAdmin();
+      }
+    }
+    
+    // ============================================================================
+    // PENDING REQUESTS - User signup requests awaiting approval
+    // ============================================================================
+    
+    match /pendingRequests/{requestId} {
+      // Read: User can read their own request, admin can read all
+      allow read: if isAuthenticated() && 
+        (resource.data.uid == request.auth.uid || isAdmin());
+      
+      // Create: Any authenticated user creates their signup request
+      allow create: if isAuthenticated() &&
+        request.resource.data.keys().hasOnly(['uid', 'email', 'requestedAt', 'status', 'reason']) &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.email is string;
+      
+      // Update: Only admin can change status
+      allow update: if isAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'approvedAt', 'rejectionReason']);
+      
+      // Delete: Only admin can delete (after processing)
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================================================
+    // AUDIT LOG - Immutable audit trail
+    // ============================================================================
+    
+    match /auditLog/{entryId} {
+      // Read: Only admin
+      allow read: if isAdmin();
+      
+      // Create: Backend only (via admin SDK)
+      allow create: if false;
+      
+      // Update/Delete: Not allowed (immutable)
+      allow update, delete: if false;
+    }
+    
+    // ============================================================================
+    // CATCH-ALL - Deny everything not explicitly allowed
+    // ============================================================================
+    
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
