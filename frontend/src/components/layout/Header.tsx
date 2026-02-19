@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { doc, updateDoc } from 'firebase/firestore';
 import { useAuth } from '../../hooks/useAuth';
-import { auth, db } from '../../lib/firebase';
+import { auth, db, isFirebaseConfigured } from '../../lib/firebase';
 
 export function Header() {
   // Get the current logged-in user from our auth context
@@ -18,6 +18,7 @@ export function Header() {
   // Function to handle logout
   const handleLogout = async () => {
     try {
+      if (!auth) return;
       await signOut(auth);  // Sign out from Firebase
       navigate('/login');    // Redirect to login page
     } catch (error) {
@@ -38,6 +39,10 @@ export function Header() {
     }
 
     try {
+      if (!db) {
+        alert('Firebase is not configured');
+        return;
+      }
       // Update bankroll in Firestore database
       await updateDoc(doc(db, 'users', currentUser.uid), {
         bankroll: newBankroll
@@ -57,7 +62,7 @@ export function Header() {
   // TODO: Add JSX/HTML for the header UI
 
   // If no user is logged in, don't show anything
-  if (!currentUser) return null;
+  if (!currentUser || !isFirebaseConfigured) return null;
 
   return (
     <header className="bg-gray-800 border-b border-gray-700 px-6 py-4">

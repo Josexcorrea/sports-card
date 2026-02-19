@@ -1,6 +1,7 @@
 """Pinnacle API - Sharp sportsbook lines"""
 import requests
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -10,7 +11,11 @@ class PinnacleAPI:
     
     def __init__(self):
         self.session = requests.Session()
-        self.session.headers.update({'Accept': 'application/json', 'User-Agent': 'SharpsEdgeDetector/1.0'})
+        headers = {'Accept': 'application/json', 'User-Agent': 'SharpsEdgeDetector/1.0'}
+        api_key = os.getenv("PINNACLE_API_KEY")
+        if api_key:
+            headers['Authorization'] = f'Basic {api_key}'
+        self.session.headers.update(headers)
     
     def get_sports(self):
         try:

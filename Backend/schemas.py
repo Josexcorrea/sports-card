@@ -28,7 +28,9 @@ class EVCalculation(BaseModel):
 
 class KellyCalculation(BaseModel):
     kelly_fraction: float
-    kelly_bet: float
+    full_kelly_bet: float
+    half_kelly_bet: float
+    quarter_kelly_bet: float
     is_valid: bool
 
 class ArbitrageScenario(BaseModel):
@@ -41,7 +43,7 @@ class ArbitrageScenario(BaseModel):
 
 class GameAnalysis(BaseModel):
     ev_analysis: EVCalculation
-    kelly_analysis: KellyCalculation
+    kelly_calculation: KellyCalculation
     arbitrage_analysis: Optional[ArbitrageScenario] = None
 
 class OddsSnapshot(BaseModel):

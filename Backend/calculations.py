@@ -31,24 +31,27 @@ def calculate_arbitrage_scenarios(pm_odds_decimal: float, sharp_odds_decimal: fl
     pm_prob = 1 / pm_odds_decimal
     sharp_prob = 1 / sharp_odds_decimal
     total_prob = pm_prob + sharp_prob
-    
+
     has_arb = total_prob < 1.0
-    arb_percent = (1 / total_prob - 1) * 100 if total_prob > 0 else 0
-    
-    if has_arb and total_prob > 0:
-        pm_bet = stake * (sharp_prob / total_prob)
-        sharp_bet = stake * (pm_prob / total_prob)
-        profit = (pm_bet * pm_odds_decimal) + (sharp_bet * sharp_odds_decimal) - stake - stake
+    # Guaranteed profit as % of total stake when arb exists
+    arb_percent = (1 / total_prob - 1) * 100 if has_arb else 0
+
+    if has_arb:
+        # Allocate stake proportionally so both outcomes return the same amount
+        pm_bet = stake * pm_prob / total_prob
+        sharp_bet = stake * sharp_prob / total_prob
+        # Guaranteed return = stake / total_prob (whichever side wins)
+        profit = stake / total_prob - stake
     else:
-        pm_bet = 0
-        sharp_bet = 0
-        profit = 0
-    
+        pm_bet = 0.0
+        sharp_bet = 0.0
+        profit = 0.0
+
     return {
         "has_arbitrage": has_arb,
-        "arbitrage_percent": max(0, arb_percent),
+        "arbitrage_percent": round(max(0.0, arb_percent), 4),
         "pm_bet": round(pm_bet, 2),
         "sharp_bet": round(sharp_bet, 2),
         "guaranteed_profit": round(profit, 2),
-        "roi_percent": round((profit / (stake * 2)) * 100, 2) if stake > 0 else 0,
+        "roi_percent": round((profit / stake) * 100, 4) if stake > 0 and has_arb else 0.0,
     }

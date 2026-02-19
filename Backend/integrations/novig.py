@@ -1,6 +1,7 @@
 """Novig API - Prediction market"""
 import requests
 import logging
+import os
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -11,7 +12,11 @@ class NovigAPI:
     
     def __init__(self):
         self.session = requests.Session()
-        self.session.headers.update({'Accept': 'application/json', 'User-Agent': 'SharpsEdgeDetector/1.0'})
+        headers = {'Accept': 'application/json', 'User-Agent': 'SharpsEdgeDetector/1.0'}
+        api_key = os.getenv("NOVIG_API_KEY")
+        if api_key:
+            headers['Authorization'] = f'Bearer {api_key}'
+        self.session.headers.update(headers)
     
     def get_events(self, sport: Optional[str] = None, limit: int = 50):
         try:

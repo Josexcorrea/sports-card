@@ -30,7 +30,7 @@ app = FastAPI(
 # ============================================================================
 # SECURITY: CORS Configuration - Restrictive whitelist
 # ============================================================================
-allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+allowed_origins = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:3000").split(",")
 allowed_origins = [origin.strip() for origin in allowed_origins]
 
 app.add_middleware(
@@ -85,21 +85,38 @@ async def health_check():
 
 @app.post("/calculate", response_model=GameAnalysis)
 async def calculate_analysis(request: CalculateRequest):
-    pm_odds = request.pm_odds or 2.0
     sharp_prob = american_to_implied_probability(request.sharp_odds)
     true_prob = request.true_probability if request.true_probability else sharp_prob
-    
-    ev = calculate_ev(request.sharp_odds, true_prob)
-    kelly = calculate_kelly_criterion(true_prob, 1 - true_prob, american_to_decimal(request.sharp_odds))
-    kelly_bet = calculate_kelly_bet(kelly, request.bankroll)
-    
     sharp_decimal = american_to_decimal(request.sharp_odds)
-    arb = calculate_arbitrage_scenarios(pm_odds, sharp_decimal, request.bankroll)
+
+    # EV = sharp_implied_prob × PM_decimal - 1
+    # Positive = PM beats sharp price, Negative = PM worse than sharp
+    if request.pm_odds:
+        pm_decimal_for_ev = american_to_decimal(request.pm_odds)
+        ev = (true_prob * pm_decimal_for_ev) - 1
+    else:
+        ev = 0.0
+
+    # Kelly uses best available decimal odds
+    pm_odds_decimal = american_to_decimal(request.pm_odds) if request.pm_odds else None
+    best_decimal = max(sharp_decimal, pm_odds_decimal) if pm_odds_decimal else sharp_decimal
+    kelly = calculate_kelly_criterion(true_prob, 1 - true_prob, best_decimal)
+    kelly_bet = calculate_kelly_bet(kelly, request.bankroll)
+
+    # Convert pm_odds from American to decimal before passing to arb calculator
+    pm_odds_decimal = american_to_decimal(request.pm_odds) if request.pm_odds else None
+    arb = calculate_arbitrage_scenarios(pm_odds_decimal, sharp_decimal, request.bankroll) if pm_odds_decimal else None
     
     return GameAnalysis(
-        ev_analysis=EVCalculation(ev_percent=ev * 100, has_edge=ev > 0, sharp_probability=sharp_prob),
-        kelly_analysis=KellyCalculation(kelly_fraction=kelly, kelly_bet=kelly_bet, is_valid=kelly > 0),
-        arbitrage_analysis=ArbitrageScenario(**arb) if pm_odds else None,
+        ev_analysis=EVCalculation(ev_percent=round(ev * 100, 4), has_edge=ev > 0, sharp_probability=round(sharp_prob, 6)),
+        kelly_calculation=KellyCalculation(
+            kelly_fraction=round(kelly, 6),
+            full_kelly_bet=round(kelly_bet, 2),
+            half_kelly_bet=round(kelly_bet * 0.5, 2),
+            quarter_kelly_bet=round(kelly_bet * 0.25, 2),
+            is_valid=kelly > 0,
+        ),
+        arbitrage_analysis=ArbitrageScenario(**arb) if arb else None,
     )
 
 @app.get("/odds/upcoming")

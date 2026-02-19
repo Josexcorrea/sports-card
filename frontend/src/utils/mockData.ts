@@ -68,9 +68,9 @@ export const mockGames: Game[] = [
     sharpSportsbookFavLine: -105,
     sharpSportsbookDogLine: -115,
     predictionMarketFavLine: -110,
-    predictionMarketDogLine: -110,
+    predictionMarketDogLine: -130,
     predictionMarketSource: 'Novig',
     bestEVSide: 'dog',
-    evPercentage: -0.5
+    evPercentage: -3.7
   }
 ];

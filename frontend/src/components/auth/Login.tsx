@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { auth, db } from '../../lib/firebase';
+import { auth, db, isFirebaseConfigured } from '../../lib/firebase';
 
 export function Login() {
   const navigate = useNavigate();
@@ -19,6 +19,10 @@ export function Login() {
     setLoading(true);
 
     try {
+      if (!auth || !db) {
+        setError('Firebase is not configured.');
+        return;
+      }
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       
       // Check if user is approved
@@ -35,9 +39,9 @@ export function Login() {
       return;
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to login');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   const handleRequestAccess = async (e: React.FormEvent) => {
@@ -46,6 +50,10 @@ export function Login() {
     setLoading(true);
 
     try {
+      if (!auth || !db) {
+        setError('Firebase is not configured.');
+        return;
+      }
       // Create auth account
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       
@@ -64,9 +72,9 @@ export function Login() {
       setRequestSubmitted(true);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to submit request');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   const handleGoogleSignIn = async () => {
@@ -74,6 +82,10 @@ export function Login() {
     setLoading(true);
 
     try {
+      if (!auth || !db) {
+        setError('Firebase is not configured.');
+        return;
+      }
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
       
@@ -102,9 +114,9 @@ export function Login() {
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to sign in with Google');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   if (requestSubmitted) {
@@ -137,6 +149,12 @@ export function Login() {
         <h2 className="text-3xl font-bold text-white mb-6 text-center">
           {isLogin ? 'Login' : 'Request Access'}
         </h2>
+
+        {!isFirebaseConfigured && (
+          <div className="bg-yellow-900/40 border border-yellow-700 text-yellow-200 px-4 py-3 rounded mb-4">
+            Firebase is not configured. Create <strong>.env</strong> from <strong>.env.example</strong> and add your Firebase values.
+          </div>
+        )}
 
         {error && (
           <div className="bg-red-900/50 border border-red-700 text-red-200 px-4 py-3 rounded mb-4">
@@ -177,7 +195,7 @@ export function Login() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !isFirebaseConfigured}
             className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed"
           >
             {loading ? 'Loading...' : isLogin ? 'Login' : 'Submit Request'}
@@ -196,7 +214,7 @@ export function Login() {
 
           <button
             onClick={handleGoogleSignIn}
-            disabled={loading}
+            disabled={loading || !isFirebaseConfigured}
             className="mt-4 w-full bg-white text-gray-900 py-2 px-4 rounded-md hover:bg-gray-100 transition-colors disabled:bg-gray-600 disabled:cursor-not-allowed flex items-center justify-center gap-3"
           >
             <svg className="w-5 h-5" viewBox="0 0 24 24">

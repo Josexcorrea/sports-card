@@ -12,35 +12,26 @@ interface GameCardProps {
 }
 
 interface GameAnalysis {
-  game_id: string;
-  away_team: string;
-  home_team: string;
-  sport: string;
-  event_time: string;
-  sharp_odds: number;
-  pm_odds: number;
-  best_offer: string;
   ev_analysis: {
+    ev_percent: number;
+    has_edge: boolean;
     sharp_probability: number;
-    best_offer_probability: number;
-    expected_value_percent: number;
-    is_profitable: boolean;
   };
   kelly_calculation: {
-    kelly_percent: number;
-    bankroll: number;
+    kelly_fraction: number;
     full_kelly_bet: number;
     half_kelly_bet: number;
     quarter_kelly_bet: number;
+    is_valid: boolean;
   };
-  arbitrage_scenarios: Array<{
-    hedge_odds: number;
-    required_bet: number;
+  arbitrage_analysis: {
+    has_arbitrage: boolean;
+    arbitrage_percent: number;
+    pm_bet: number;
+    sharp_bet: number;
     guaranteed_profit: number;
-    roi: number;
-  }>;
-  confidence_score: number;
-  ml_recommendation: string;
+    roi_percent: number;
+  } | null;
 }
 
 export function GameCard({ game }: GameCardProps) {
@@ -51,9 +42,13 @@ export function GameCard({ game }: GameCardProps) {
   const [arbFoundOdds, setArbFoundOdds] = useState<number>(-110);
   const [arbBetAmount, setArbBetAmount] = useState<number>(100);
 
+  // Use the best EV side (fav or dog) as the starting point
+  const bestSharpOdds = game.bestEVSide === 'dog' ? game.sharpSportsbookDogLine : game.sharpSportsbookFavLine;
+  const bestPMOdds = game.bestEVSide === 'dog' ? game.predictionMarketDogLine : game.predictionMarketFavLine;
+
   // Editable odds state (for what-if scenarios)
-  const [editableSharpML, setEditableSharpML] = useState(game.sharpSportsbookFavLine);
-  const [editableBestOfferOdds, setEditableBestOfferOdds] = useState(game.predictionMarketFavLine);
+  const [editableSharpML, setEditableSharpML] = useState(bestSharpOdds);
+  const [editableBestOfferOdds, setEditableBestOfferOdds] = useState(bestPMOdds);
   
   // API state
   const [analysis, setAnalysis] = useState<GameAnalysis | null>(null);
@@ -63,10 +58,9 @@ export function GameCard({ game }: GameCardProps) {
   // Initialize editable odds when modal opens
   const handleExpandModal = () => {
     setIsExpanded(true);
-    setEditableSharpML(game.sharpSportsbookFavLine);
-    setEditableBestOfferOdds(game.predictionMarketFavLine);
-    // Fetch analysis for live data
-    fetchAnalysis(game.sharpSportsbookFavLine, game.predictionMarketFavLine);
+    setEditableSharpML(bestSharpOdds);
+    setEditableBestOfferOdds(bestPMOdds);
+    fetchAnalysis(bestSharpOdds, bestPMOdds);
   };
 
   // Reset to live data when modal closes
@@ -126,12 +120,11 @@ export function GameCard({ game }: GameCardProps) {
   // Get bankroll from Auth context (Firestore)
   const bankroll = currentUser?.bankroll || 0;
 
-  // Use API analysis if available, otherwise use live data for preview
-  const sharpML = editableSharpML || game.sharpSportsbookFavLine;
+  const sharpML = editableSharpML;
   const sharpProb = americanToImpliedProbability(sharpML);
   const sharpDecimal = americanToDecimal(sharpML);
-  
-  const pmOdds = editableBestOfferOdds || game.predictionMarketFavLine;
+
+  const pmOdds = editableBestOfferOdds;
   const pmDecimal = americanToDecimal(pmOdds);
   
   // Computed editable values
@@ -143,17 +136,33 @@ export function GameCard({ game }: GameCardProps) {
   const bestOfferProb = americanToImpliedProbability(bestOfferOdds);
   const bestOfferDecimal = Math.max(sharpDecimal, pmDecimal);
 
-  // Get values from API response or fallback to calculations
-  const ev = analysis ? (analysis.ev_analysis.expected_value_percent / 100) : ((sharpProb * bestOfferDecimal) - 1);
-  const hasPositiveEV = analysis ? analysis.ev_analysis.is_profitable : (ev > 0);
-  const kellyPercent = analysis ? analysis.kelly_calculation.kelly_percent : (ev > 0 ? ev / (bestOfferDecimal - 1) : 0);
+  // EV = sharp_implied_prob × PM_decimal - 1
+  // Positive = PM offers better price than sharp → edge exists
+  // Negative = PM is worse than sharp → no edge
+  const pmDecimalForEV = pmDecimal;
+  const ev = analysis
+    ? analysis.ev_analysis.ev_percent / 100
+    : sharpProb * pmDecimalForEV - 1;
+  const hasPositiveEV = analysis ? analysis.ev_analysis.has_edge : ev > 0;
+
+  const kellyPercent = analysis
+    ? analysis.kelly_calculation.kelly_fraction
+    : ev > 0 ? ev / (bestOfferDecimal - 1) : 0;
+
   const kellyMultipliers = { full: 1, half: 0.5, quarter: 0.25 };
+
   const kellySizeMap = {
-    full: analysis?.kelly_calculation.full_kelly_bet || 0,
-    half: analysis?.kelly_calculation.half_kelly_bet || 0,
-    quarter: analysis?.kelly_calculation.quarter_kelly_bet || 0,
+    full: analysis
+      ? analysis.kelly_calculation.full_kelly_bet
+      : bankroll * kellyPercent,
+    half: analysis
+      ? analysis.kelly_calculation.half_kelly_bet
+      : bankroll * kellyPercent * 0.5,
+    quarter: analysis
+      ? analysis.kelly_calculation.quarter_kelly_bet
+      : bankroll * kellyPercent * 0.25,
   };
-  const riskAmount = kellySizeMap[selectedKelly] || 0;
+  const riskAmount = Math.max(0, kellySizeMap[selectedKelly] ?? 0);
 
   // Calculate arbitrage scenarios locally (independent of API)
   const arbScenarios = calculateArbProfitScenarios(arbFoundOdds, arbBetAmount);
@@ -166,9 +175,14 @@ export function GameCard({ game }: GameCardProps) {
         className="bg-gray-800 rounded-lg p-4 border border-gray-700 hover:border-blue-600 transition-all cursor-pointer"
       >
         <div className="space-y-3">
-          {/* Sport Badge */}
-          <div className="inline-block px-2 py-1 bg-blue-600 text-white text-xs font-bold rounded">
-            {game.sport}
+          {/* Sport + Side Badges */}
+          <div className="flex items-center gap-2">
+            <div className="inline-block px-2 py-1 bg-blue-600 text-white text-xs font-bold rounded">
+              {game.sport}
+            </div>
+            <div className={`inline-block px-2 py-1 text-white text-xs font-bold rounded ${game.bestEVSide === 'fav' ? 'bg-yellow-600' : 'bg-purple-600'}`}>
+              {game.bestEVSide === 'fav' ? 'FAV' : 'DOG'}
+            </div>
           </div>
 
           {/* Teams */}
@@ -176,7 +190,7 @@ export function GameCard({ game }: GameCardProps) {
             {game.awayTeam} @ {game.homeTeam}
           </div>
 
-          {/* Sharp ML Display */}
+          {/* Sharp ML vs PM Offer */}
           <div className="grid grid-cols-2 gap-4 pt-2 border-t border-gray-700">
             <div>
               <div className="text-xs text-gray-400 uppercase tracking-wide">Sharp ML</div>
@@ -186,14 +200,13 @@ export function GameCard({ game }: GameCardProps) {
               </div>
             </div>
 
-            {/* Best Offer */}
             <div>
-              <div className="text-xs text-gray-400 uppercase tracking-wide">Best Offer</div>
-              <div className={`text-lg font-bold ${bestOfferSource === 'PM' ? 'text-green-400' : 'text-yellow-400'}`}>
-                {bestOfferOdds > 0 ? '+' : ''}{bestOfferOdds}
+              <div className="text-xs text-gray-400 uppercase tracking-wide">PM Offer</div>
+              <div className={`text-lg font-bold ${pmDecimal > sharpDecimal ? 'text-green-400' : 'text-red-400'}`}>
+                {pmOdds > 0 ? '+' : ''}{pmOdds}
               </div>
               <div className="text-xs text-gray-500">
-                {bestOfferSource === 'PM' ? '✓ PM Better' : 'Sharp'}
+                {game.predictionMarketSource}
               </div>
             </div>
           </div>
@@ -267,8 +280,13 @@ export function GameCard({ game }: GameCardProps) {
                     {/* Header with Close and Arbitrage Toggle */}
                     <div className="flex items-center justify-between mb-6">
                       <div className="flex-1 text-center">
-                        <div className="inline-block px-2 py-1 bg-blue-600 text-white text-xs font-bold rounded mb-2">
-                          {game.sport}
+                        <div className="flex items-center justify-center gap-2 mb-2">
+                          <div className="inline-block px-2 py-1 bg-blue-600 text-white text-xs font-bold rounded">
+                            {game.sport}
+                          </div>
+                          <div className={`inline-block px-2 py-1 text-white text-xs font-bold rounded ${game.bestEVSide === 'fav' ? 'bg-yellow-600' : 'bg-purple-600'}`}>
+                            {game.bestEVSide === 'fav' ? 'FAV SIDE' : 'DOG SIDE'}
+                          </div>
                         </div>
                         <div className="text-lg font-bold text-white">
                           {game.awayTeam} @ {game.homeTeam}

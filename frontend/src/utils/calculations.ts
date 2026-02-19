@@ -195,13 +195,14 @@ export function detectArbitrage(oddsA: number, oddsB: number): {
 } {
   const probA = americanToImpliedProbability(oddsA);
   const probB = americanToImpliedProbability(oddsB);
-  
-  const arbSum = 1 / probA + 1 / probB;
-  const hasArbitrage = arbSum < 1;
-  
-  // How much profit% you lock in
-  const arbPercentage = (1 - arbSum) * 100;
-  
+
+  // If the sum of implied probabilities is < 1, arb exists
+  const probSum = probA + probB;
+  const hasArbitrage = probSum < 1;
+
+  // Guaranteed profit as % of total stake: (1/probSum - 1) * 100
+  const arbPercentage = hasArbitrage ? (1 / probSum - 1) * 100 : 0;
+
   return {
     hasArbitrage,
     arbPercentage
@@ -222,38 +223,30 @@ export function detectArbitrage(oddsA: number, oddsB: number): {
 export function calculateArbProfitScenarios(
   sideAOdds: number,
   betAmount: number,
-  testOdds: number[] = [-150, -140, -130, -120, -110, -100, 0, 100, 110, 120, 130, 140, 150]
+  testOdds: number[] = [-150, -140, -130, -120, -110, 110, 120, 130, 140, 150]
 ): Array<{ odds: number; requiredBet: number; profit: number; roi: number }> {
   const decimalOddsA = americanToDecimal(sideAOdds);
-  
+
   return testOdds.map(sideBOdds => {
     const decimalOddsB = americanToDecimal(sideBOdds);
-    
-    // If side A wins: we get back betAmount * decimalOddsA, minus our original bet = profit
-    const profitIfA = betAmount * (decimalOddsA - 1);
-    
-    // To hedge, we need a bet on B that wins us the same if B wins (zero total loss/gain)
-    // If B wins and we bet X: we get back X * decimalOddsB
-    // We need: X * decimalOddsB = betAmount (our original risk)
-    // So: X = betAmount / decimalOddsB
-    const requiredBetB = betAmount / decimalOddsB;
-    
-    // Total risk = betAmount on A + requiredBetB on B
-    const totalRisk = betAmount + requiredBetB;
-    
-    // If A wins: we get profitIfA
-    // If B wins: we get betAmount (which covers our total risk)
-    // Net profit = profitIfA - requiredBetB (since if B wins, we just break even on total risk)
-    const netProfit = profitIfA - requiredBetB;
-    
-    // ROI = profit / total risk wagered
-    const roi = netProfit / totalRisk;
-    
+
+    // Optimal hedge: size the B bet so profit is equal whether A or B wins.
+    // Condition: betAmount * decimalOddsA = hedgeBet * decimalOddsB
+    // → hedgeBet = betAmount * decimalOddsA / decimalOddsB
+    const hedgeBet = betAmount * decimalOddsA / decimalOddsB;
+
+    // Guaranteed profit (same on either outcome):
+    // If A wins: betAmount * decimalOddsA - betAmount - hedgeBet
+    const profit = betAmount * decimalOddsA - betAmount - hedgeBet;
+
+    const totalRisk = betAmount + hedgeBet;
+    const roi = totalRisk > 0 ? profit / totalRisk : 0;
+
     return {
       odds: sideBOdds,
-      requiredBet: requiredBetB,
-      profit: netProfit,
-      roi
+      requiredBet: Math.round(hedgeBet * 100) / 100,
+      profit: Math.round(profit * 100) / 100,
+      roi: Math.round(roi * 10000) / 10000,
     };
   });
 }

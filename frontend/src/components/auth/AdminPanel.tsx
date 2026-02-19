@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { collection, query, where, getDocs, doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { db, isFirebaseConfigured } from '../../lib/firebase';
 import type { User } from '../../types';
 
 interface PendingUser extends User {
@@ -14,6 +14,10 @@ export function AdminPanel() {
   const loadPendingUsers = async () => {
     setLoading(true);
     try {
+      if (!db) {
+        setPendingUsers([]);
+        return;
+      }
       const q = query(collection(db, 'users'), where('approved', '==', false));
       const snapshot = await getDocs(q);
       
@@ -30,8 +34,9 @@ export function AdminPanel() {
       setPendingUsers(users);
     } catch (error) {
       console.error('Error loading pending users:', error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -51,6 +56,9 @@ export function AdminPanel() {
 
   const handleApprove = async (userId: string) => {
     try {
+      if (!db) {
+        return;
+      }
       await updateDoc(doc(db, 'users', userId), {
         approved: true,
       });
@@ -76,6 +84,19 @@ export function AdminPanel() {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="text-white text-xl">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!isFirebaseConfigured || !db) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center px-4">
+        <div className="max-w-md w-full bg-gray-800 rounded-lg p-6 border border-gray-700 text-center">
+          <h2 className="text-xl font-semibold text-white mb-3">Firebase not configured</h2>
+          <p className="text-gray-300 text-sm">
+            Create <strong>.env</strong> from <strong>.env.example</strong> and fill in Firebase values.
+          </p>
+        </div>
       </div>
     );
   }

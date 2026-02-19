@@ -1,17 +1,22 @@
 """Kalshi API - Prediction market"""
 import requests
 import logging
+import os
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 class KalshiAPI:
-    BASE_URL = "https://api.kalshi.com/v1"
+    BASE_URL = "https://api.kalshi.com/trade-api/v2"
     SPORTS_MAP = {'NBA': 'sports/nba', 'NFL': 'sports/nfl', 'NHL': 'sports/nhl', 'MLB': 'sports/mlb'}
     
     def __init__(self):
         self.session = requests.Session()
-        self.session.headers.update({'Accept': 'application/json', 'User-Agent': 'SharpsEdgeDetector/1.0'})
+        headers = {'Accept': 'application/json', 'User-Agent': 'SharpsEdgeDetector/1.0'}
+        api_key = os.getenv("KALSHI_API_KEY")
+        if api_key:
+            headers['Authorization'] = f'Bearer {api_key}'
+        self.session.headers.update(headers)
     
     def get_markets(self, category: Optional[str] = None, limit: int = 50):
         try:
